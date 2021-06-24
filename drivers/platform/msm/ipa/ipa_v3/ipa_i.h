@@ -3212,12 +3212,16 @@ static inline int ipa3_mpm_enable_adpl_over_odl(bool enable)
 
 static inline void *alloc_and_init(u32 size, u32 init_val)
 {
-	void *ptr = kmalloc(size, GFP_KERNEL);
+        void *ptr = NULL;
 
-	if (ptr)
-		memset(ptr, init_val, size);
+        if (size > 0) {
+                ptr = kmalloc(size, GFP_KERNEL);
+        }
 
-	return ptr;
+        if (ptr)
+                memset(ptr, init_val, size);
+
+        return ptr;
 }
 
 /* query ipa APQ mode*/

@@ -2349,7 +2349,7 @@ static ssize_t ipa3_read_ipahal_regs(struct file *file, char __user *ubuf,
 static ssize_t ipa3_read_wdi_gsi_stats(struct file *file,
 		char __user *ubuf, size_t count, loff_t *ppos)
 {
-	struct ipa_uc_dbg_ring_stats stats;
+	struct ipa_uc_dbg_ring_stats stats = {0};
 	int nbytes;
 	int cnt = 0;
 
