@@ -8541,7 +8541,7 @@ void ipa3_set_resorce_groups_min_max_limits(void)
 
 static bool ipa3_gsi_channel_is_quite(struct ipa3_ep_context *ep)
 {
-	bool empty;
+	bool empty = false;
 
 	gsi_is_channel_empty(ep->gsi_chan_hdl, &empty);
 	if (!empty)
@@ -9174,8 +9174,8 @@ int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base,
 {
 	const struct elf32_hdr *ehdr;
 	const struct elf32_phdr *phdr;
-	unsigned long gsi_iram_ofst;
-	unsigned long gsi_iram_size;
+	unsigned long gsi_iram_ofst = 0;
+	unsigned long gsi_iram_size = 0;
 	int rc;
 	struct ipa3_hps_dps_areas_info dps_hps_info;
 
