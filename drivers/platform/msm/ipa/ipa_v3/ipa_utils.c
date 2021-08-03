@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <net/ip.h>
@@ -3994,14 +3994,14 @@ static struct ipa3_mem_partition ipa_4_11_mem_part = {
         .apps_hdr_proc_ctx_size         = 0x200,
         .apps_hdr_proc_ctx_size_ddr     = 0x0,
         .nat_tbl_ofst                   = 0x17A0,
-        .nat_tbl_size                   = 0x800,
-        .pdn_config_ofst                = 0x24A8,
+        .nat_tbl_size                   = 0x500,
+        .pdn_config_ofst                = 0x1CA8,
         .pdn_config_size                = 0x50,
-        .stats_quota_q6_ofst            = 0x2500,
+        .stats_quota_q6_ofst            = 0x1D00,
         .stats_quota_q6_size            = 0x30,
-        .stats_quota_ap_ofst            = 0x2530,
+        .stats_quota_ap_ofst            = 0x1D30,
         .stats_quota_ap_size            = 0x48,
-        .stats_tethering_ofst           = 0x2578,
+        .stats_tethering_ofst           = 0x1D78,
         .stats_tethering_size           = 0x238,
         .stats_flt_v4_ofst              = 0,
         .stats_flt_v4_size              = 0,
@@ -4011,8 +4011,8 @@ static struct ipa3_mem_partition ipa_4_11_mem_part = {
         .stats_rt_v4_size               = 0,
         .stats_rt_v6_ofst               = 0,
         .stats_rt_v6_size               = 0,
-        .stats_fnr_ofst                 = 0x27B0,
-        .stats_fnr_size                 = 0x0,
+        .stats_fnr_ofst                 = 0x1FB0,
+        .stats_fnr_size                 = 0x800,
         .stats_drop_ofst                = 0x27B0,
         .stats_drop_size                = 0x20,
         .modem_comp_decomp_ofst         = 0x0,
@@ -8784,6 +8784,8 @@ void ipa3_force_close_coal(void)
 int ipa3_suspend_apps_pipes(bool suspend)
 {
 	int res;
+	struct ipa_ep_cfg_holb holb_cfg;
+	int odl_ep_idx;
 
 	/* As per HPG first need start/stop coalescing channel
 	 * then default one. Coalescing client number was greater then
@@ -8804,6 +8806,24 @@ int ipa3_suspend_apps_pipes(bool suspend)
 	res = _ipa_suspend_resume_pipe(IPA_CLIENT_ODL_DPL_CONS, suspend);
 	if (res == -EAGAIN)
 		goto undo_odl_cons;
+
+	odl_ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_ODL_DPL_CONS);
+	if (odl_ep_idx != IPA_EP_NOT_ALLOCATED && ipa3_ctx->ep[odl_ep_idx].valid) {
+		memset(&holb_cfg, 0, sizeof(holb_cfg));
+		if (suspend)
+			holb_cfg.en = 0;
+		else
+			holb_cfg.en = 1;
+
+		ipahal_write_reg_n_fields(IPA_ENDP_INIT_HOL_BLOCK_EN_n,
+				odl_ep_idx, &holb_cfg);
+		/* IPA4.5 issue requires HOLB_EN to be written twice */
+		if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_5 && holb_cfg.en)
+			ipahal_write_reg_n_fields(
+					IPA_ENDP_INIT_HOL_BLOCK_EN_n,
+					odl_ep_idx, &holb_cfg);
+
+	}
 
 	res = _ipa_suspend_resume_pipe(IPA_CLIENT_APPS_WAN_LOW_LAT_CONS,
 		suspend);

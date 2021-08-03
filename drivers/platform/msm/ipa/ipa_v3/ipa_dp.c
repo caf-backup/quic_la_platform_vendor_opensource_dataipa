@@ -89,6 +89,8 @@
 
 #define IPA_QMAP_ID_BYTE 0
 
+#define IPA_MEM_ALLOC_RETRY 5
+
 static struct sk_buff *ipa3_get_skb_ipa_rx(unsigned int len, gfp_t flags);
 static void ipa3_replenish_wlan_rx_cache(struct ipa3_sys_context *sys);
 static void ipa3_replenish_rx_cache(struct ipa3_sys_context *sys);
@@ -430,6 +432,12 @@ int ipa3_send(struct ipa3_sys_context *sys,
 	memset(gsi_xfer, 0, sizeof(gsi_xfer[0]) * num_desc);
 
 	spin_lock_bh(&sys->spinlock);
+
+	if (unlikely(atomic_read(&sys->ep->disconnect_in_progress))) {
+		IPAERR("Pipe disconnect in progress dropping the packet\n");
+		spin_unlock_bh(&sys->spinlock);
+		return -EFAULT;
+	}
 
 	for (i = 0; i < num_desc; i++) {
 		if (!list_empty(&sys->avail_tx_wrapper_list)) {
@@ -1445,6 +1453,7 @@ int ipa3_teardown_sys_pipe(u32 clnt_hdl)
 	if (IPA_CLIENT_IS_PROD(ep->client)) {
 		do {
 			spin_lock_bh(&ep->sys->spinlock);
+			atomic_set(&ep->disconnect_in_progress, 1);
 			empty = list_empty(&ep->sys->head_desc_list);
 			spin_unlock_bh(&ep->sys->spinlock);
 			if (!empty)
@@ -2878,7 +2887,7 @@ static int ipa3_lan_rx_pyld_hdlr(struct sk_buff *skb,
 	unsigned long ptr;
 
 	IPA_DUMP_BUFF(skb->data, 0, skb->len);
-
+	trace_ipa3_lan_rx_pyld_hdlr_entry(skb,sys->ep->client);
 	if (skb->len == 0) {
 		IPAERR("ZLT packet arrived to AP\n");
 		goto out;
@@ -3160,6 +3169,7 @@ begin:
 
 out:
 	ipa3_skb_recycle(skb);
+	trace_ipa3_lan_rx_pyld_hdlr_exit(sys->ep->client);
 	return 0;
 }
 
@@ -3426,6 +3436,7 @@ void ipa3_lan_rx_cb(void *priv, enum ipa_dp_evt_type evt, unsigned long data)
 	void *client_priv;
 
 	ipahal_pkt_status_parse_thin(rx_skb->data, &status);
+	trace_ipa3_lan_rx_cb_entry(status.endp_src_idx);
 	src_pipe = status.endp_src_idx;
 	metadata = status.metadata;
 	ucp = status.ucp;
@@ -3467,6 +3478,7 @@ void ipa3_lan_rx_cb(void *priv, enum ipa_dp_evt_type evt, unsigned long data)
 		dev_kfree_skb_any(rx_skb);
 	}
 
+	trace_ipa3_lan_rx_cb_exit(status.endp_src_idx);
 }
 
 static void ipa3_recycle_rx_wrapper(struct ipa3_rx_pkt_wrapper *rx_pkt)
@@ -3912,7 +3924,9 @@ static void ipa3_set_aggr_limit(struct ipa_sys_connect_params *in,
 	sys->ep->status.status_en = false;
 	sys->rx_buff_sz = IPA_GENERIC_RX_BUFF_SZ(adjusted_sz);
 
-	if (in->client == IPA_CLIENT_APPS_WAN_COAL_CONS)
+	if (in->client == IPA_CLIENT_APPS_WAN_COAL_CONS ||
+		(in->client == IPA_CLIENT_APPS_WAN_CONS &&
+			ipa3_ctx->ipa_hw_type <= IPA_HW_v4_2))
 		in->ipa_ep_cfg.aggr.aggr_hard_byte_limit_en = 1;
 
 	*aggr_byte_limit = sys->rx_buff_sz < *aggr_byte_limit ?
@@ -4866,6 +4880,33 @@ fail_setup_event_ring:
 	return result;
 }
 
+static void *ipa3_ring_alloc(struct device *dev, size_t size,
+	dma_addr_t *dma_handle, gfp_t gfp)
+{
+	void *va_addr;
+	int retry_cnt = 0;
+
+alloc:
+	va_addr = dma_alloc_coherent(dev, size, dma_handle, gfp);
+	if (!va_addr) {
+		if (retry_cnt < IPA_MEM_ALLOC_RETRY) {
+			IPADBG("Fail to dma alloc retry cnt = %d\n",
+				retry_cnt);
+			retry_cnt++;
+			goto alloc;
+		}
+
+		if (gfp == GFP_ATOMIC) {
+			gfp = GFP_KERNEL;
+			goto alloc;
+		}
+		IPAERR("fail to dma alloc %u bytes\n", size);
+		ipa_assert();
+	}
+
+	return va_addr;
+}
+
 static int ipa_gsi_setup_event_ring(struct ipa3_ep_context *ep,
 	u32 ring_size, gfp_t mem_flag)
 {
@@ -4882,13 +4923,8 @@ static int ipa_gsi_setup_event_ring(struct ipa3_ep_context *ep,
 	gsi_evt_ring_props.re_size = GSI_EVT_RING_RE_SIZE_16B;
 	gsi_evt_ring_props.ring_len = ring_size;
 	gsi_evt_ring_props.ring_base_vaddr =
-		dma_alloc_coherent(ipa3_ctx->pdev, gsi_evt_ring_props.ring_len,
+		ipa3_ring_alloc(ipa3_ctx->pdev, gsi_evt_ring_props.ring_len,
 		&evt_dma_addr, mem_flag);
-	if (!gsi_evt_ring_props.ring_base_vaddr) {
-		IPAERR("fail to dma alloc %u bytes\n",
-			gsi_evt_ring_props.ring_len);
-		return -ENOMEM;
-	}
 	gsi_evt_ring_props.ring_base_addr = evt_dma_addr;
 
 	/* copy mem info */
@@ -4996,14 +5032,8 @@ static int ipa_gsi_setup_transfer_ring(struct ipa3_ep_context *ep,
 	gsi_channel_props.ring_len = ring_size;
 
 	gsi_channel_props.ring_base_vaddr =
-		dma_alloc_coherent(ipa3_ctx->pdev, gsi_channel_props.ring_len,
+		ipa3_ring_alloc(ipa3_ctx->pdev, gsi_channel_props.ring_len,
 			&dma_addr, mem_flag);
-	if (!gsi_channel_props.ring_base_vaddr) {
-		IPAERR("fail to dma alloc %u bytes\n",
-			gsi_channel_props.ring_len);
-		result = -ENOMEM;
-		goto fail_alloc_channel_ring;
-	}
 	gsi_channel_props.ring_base_addr = dma_addr;
 
 	/* copy mem info */
@@ -5081,7 +5111,6 @@ fail_alloc_channel:
 	dma_free_coherent(ipa3_ctx->pdev, ep->gsi_mem_info.chan_ring_len,
 			ep->gsi_mem_info.chan_ring_base_vaddr,
 			ep->gsi_mem_info.chan_ring_base_addr);
-fail_alloc_channel_ring:
 fail_get_gsi_ep_info:
 	if (ep->gsi_evt_ring_hdl != ~0) {
 		gsi_dealloc_evt_ring(ep->gsi_evt_ring_hdl);
@@ -5239,6 +5268,7 @@ int ipa3_lan_rx_poll(u32 clnt_hdl, int weight)
 		return cnt;
 	}
 	ep = &ipa3_ctx->ep[clnt_hdl];
+	trace_ipa3_napi_poll_entry(ep->client);
 
 start_poll:
 	/*
@@ -5278,6 +5308,7 @@ start_poll:
 		IPA_ACTIVE_CLIENTS_DEC_EP_NO_BLOCK(ep->client);
 	}
 
+	trace_ipa3_napi_poll_exit(ep->client, cnt, ep->sys->len);
 	return cnt;
 }
 
@@ -5380,7 +5411,7 @@ start_poll:
 		IPADBG_LOW("Client = %d not replenished free descripotrs\n",
 				ep->client);
 	}
-	trace_ipa3_napi_poll_exit(ep->client);
+	trace_ipa3_napi_poll_exit(ep->client, cnt, ep->sys->len);
 	return cnt;
 }
 
