@@ -6229,7 +6229,7 @@ static inline void ipa3_enable_napi_lan_rx(void)
 
 static inline void ipa3_register_to_fmwk(void)
 {
-	struct ipa_core_data data;
+	struct ipa_core_data data = {0};
 
 	data.ipa_tx_dp = ipa3_tx_dp;
 	data.ipa_get_hw_type = ipa_get_hw_type_internal;
