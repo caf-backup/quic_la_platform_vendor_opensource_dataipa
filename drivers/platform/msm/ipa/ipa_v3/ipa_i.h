@@ -44,6 +44,14 @@
 #define IPA_DEV_NAME_MAX_LEN 15
 #define DRV_NAME "ipa"
 
+#define IPA_v4_USB0_EP_ID		11
+#define IPA_v4_USB1_EP_ID		12
+
+#define IPA_v4_PCIE0_EP_ID		21
+#define IPA_v4_PCIE1_EP_ID		22
+
+#define IPA_v5_PCIE0_EP_ID		4
+
 #define IPA_COOKIE 0x57831603
 #define IPA_RT_RULE_COOKIE 0x57831604
 #define IPA_RT_TBL_COOKIE 0x57831605
@@ -879,7 +887,6 @@ struct ipa3_hdr_proc_ctx_tbl {
  * @rule_cnt: number of filter rules
  * @in_sys: flag indicating if filter table is located in system memory
  * @sz: the size of the filter tables
- * @end: the last header index
  * @curr_mem: current filter tables block in sys memory
  * @prev_mem: previous filter table block in sys memory
  * @rule_ids: common idr structure that holds the rule_id for each rule
@@ -896,6 +903,11 @@ struct ipa3_flt_tbl {
 	bool sticky_rear;
 	struct idr *rule_ids;
 	bool force_sys[IPA_RULE_TYPE_MAX];
+};
+
+struct ipa3_flt_tbl_nhash_lcl {
+	struct list_head link;
+	struct ipa3_flt_tbl *tbl;
 };
 
 /**
@@ -1998,6 +2010,7 @@ struct ipa3_eth_error_stats {
  * @rt_rule_cache: routing rule cache
  * @hdr_cache: header cache
  * @hdr_offset_cache: header offset cache
+ * @fnr_stats_cache: FnR stats cache
  * @hdr_proc_ctx_cache: processing context cache
  * @hdr_proc_ctx_offset_cache: processing context offset cache
  * @rt_tbl_cache: routing table cache
@@ -2121,6 +2134,7 @@ struct ipa3_context {
 	struct kmem_cache *rt_rule_cache;
 	struct kmem_cache *hdr_cache;
 	struct kmem_cache *hdr_offset_cache;
+	struct kmem_cache *fnr_stats_cache;
 	struct kmem_cache *hdr_proc_ctx_cache;
 	struct kmem_cache *hdr_proc_ctx_offset_cache;
 	struct kmem_cache *rt_tbl_cache;
@@ -2142,14 +2156,11 @@ struct ipa3_context {
 	bool hdr_proc_ctx_tbl_lcl;
 	struct ipa_mem_buffer hdr_sys_mem;
 	struct ipa_mem_buffer hdr_proc_ctx_mem;
-	bool ip4_rt_tbl_hash_lcl;
-	bool ip4_rt_tbl_nhash_lcl;
-	bool ip6_rt_tbl_hash_lcl;
-	bool ip6_rt_tbl_nhash_lcl;
-	bool ip4_flt_tbl_hash_lcl;
-	bool ip4_flt_tbl_nhash_lcl;
-	bool ip6_flt_tbl_hash_lcl;
-	bool ip6_flt_tbl_nhash_lcl;
+	bool rt_tbl_hash_lcl[IPA_IP_MAX];
+	bool rt_tbl_nhash_lcl[IPA_IP_MAX];
+	bool flt_tbl_hash_lcl[IPA_IP_MAX];
+	bool flt_tbl_nhash_lcl[IPA_IP_MAX];
+	struct list_head flt_tbl_nhash_lcl_list[IPA_IP_MAX];
 	struct ipa3_active_clients ipa3_active_clients;
 	struct ipa3_active_clients_log_ctx ipa3_active_clients_logging;
 	struct workqueue_struct *power_mgmt_wq;
@@ -2290,7 +2301,8 @@ struct ipa3_context {
 	u32 icc_num_cases;
 	u32 icc_num_paths;
 	u32 icc_clk[IPA_ICC_LVL_MAX][IPA_ICC_PATH_MAX][IPA_ICC_TYPE_MAX];
-	struct ipahal_imm_cmd_pyld *coal_cmd_pyld;
+	struct ipahal_imm_cmd_pyld *coal_cmd_pyld[2];
+	struct ipa_mem_buffer ulso_wa_cmd;
 	u32 tx_wrapper_cache_max_size;
 	struct ipa3_app_clock_vote app_clock_vote;
 	bool clients_registered;
@@ -2319,7 +2331,6 @@ struct ipa3_context {
 	u16 ulso_ip_id_max;
 	bool use_pm_wrapper;
 	u8 page_poll_threshold;
-	u32 non_hash_flt_lcl_sys_switch;
 	bool wan_common_page_pool;
 	u64 gsi_msi_addr;
 	u64 gsi_msi_clear_addr;
@@ -2332,6 +2343,8 @@ struct ipa3_context {
 	bool use_tput_est_ep;
 	struct ipa_ioc_eogre_info eogre_cache;
 	bool eogre_enabled;
+	bool is_device_crashed;
+	bool ulso_wa;
 };
 
 struct ipa3_plat_drv_res {
@@ -2417,6 +2430,7 @@ struct ipa3_plat_drv_res {
 	u32 gsi_rmnet_ll_evt_ring_intvec;
 	u32 gsi_rmnet_ll_evt_ring_irq;
 	bool use_tput_est_ep;
+	bool ulso_wa;
 };
 
 /**
@@ -2781,7 +2795,8 @@ int ipa3_add_rt_rule(struct ipa_ioc_add_rt_rule *rules);
 
 int ipa3_add_rt_rule_ext(struct ipa_ioc_add_rt_rule_ext *rules);
 
-int ipa3_add_rt_rule_ext_v2(struct ipa_ioc_add_rt_rule_ext_v2 *rules);
+int ipa3_add_rt_rule_ext_v2(struct ipa_ioc_add_rt_rule_ext_v2 *rules,
+	bool user);
 
 int ipa3_add_rt_rule_after(struct ipa_ioc_add_rt_rule_after *rules);
 
@@ -2823,6 +2838,8 @@ int ipa3_mdfy_flt_rule_v2(struct ipa_ioc_mdfy_flt_rule_v2 *rules);
 int ipa3_commit_flt(enum ipa_ip_type ip);
 
 int ipa3_reset_flt(enum ipa_ip_type ip, bool user_only);
+
+int ipa_flt_sram_set_client_prio_high(enum ipa_client_type client);
 
 /*
  * NAT
@@ -2914,6 +2931,7 @@ int ipa3_suspend_wdi_pipe(u32 clnt_hdl);
 int ipa3_get_wdi_gsi_stats(struct ipa_uc_dbg_ring_stats *stats);
 int ipa3_get_wdi3_gsi_stats(struct ipa_uc_dbg_ring_stats *stats);
 int ipa3_get_usb_gsi_stats(struct ipa_uc_dbg_ring_stats *stats);
+bool ipa_usb_is_teth_prot_connected(enum ipa_usb_teth_prot usb_teth_prot);
 int ipa3_get_aqc_gsi_stats(struct ipa_uc_dbg_ring_stats *stats);
 int ipa3_get_rtk_gsi_stats(struct ipa_uc_dbg_ring_stats *stats);
 int ipa3_get_ntn_gsi_stats(struct ipa_uc_dbg_ring_stats *stats);
@@ -3178,6 +3196,7 @@ int ipa3_tag_aggr_force_close(int pipe_num);
 void ipa3_active_clients_unlock(void);
 int ipa3_wdi_init(void);
 int ipa_get_wdi_version(void);
+bool ipa_wdi_is_tx1_used(void);
 int ipa3_write_qmapid_gsi_wdi_pipe(u32 clnt_hdl, u8 qmap_id);
 int ipa3_write_qmapid_wdi_pipe(u32 clnt_hdl, u8 qmap_id);
 int ipa3_write_qmapid_wdi3_gsi_pipe(u32 clnt_hdl, u8 qmap_id);
@@ -3305,6 +3324,7 @@ int ipa3_create_wdi_mapping(u32 num_buffers, struct ipa_wdi_buffer_info *info);
 int ipa3_set_flt_tuple_mask(int pipe_idx, struct ipahal_reg_hash_tuple *tuple);
 int ipa3_set_rt_tuple_mask(int tbl_idx, struct ipahal_reg_hash_tuple *tuple);
 void ipa3_set_resorce_groups_min_max_limits(void);
+void ipa3_set_resorce_groups_config(void);
 int ipa3_suspend_apps_pipes(bool suspend);
 void ipa3_force_close_coal(void);
 int ipa3_flt_read_tbl_from_hw(u32 pipe_idx,
@@ -3421,12 +3441,18 @@ int ipa3_eth_connect(
 int ipa3_eth_disconnect(
 	struct ipa_eth_client_pipe_info *pipe,
 	enum ipa_client_type client_type);
+#if IPA_ETH_API_VER < 2
 int ipa3_eth_client_conn_evt(struct ipa_ecm_msg *msg);
 int ipa3_eth_client_disconn_evt(struct ipa_ecm_msg *msg);
+#endif
 void ipa3_eth_get_status(u32 client, int scratch_id,
 	struct ipa3_eth_error_stats *stats);
 int ipa3_get_gsi_chan_info(struct gsi_chan_info *gsi_chan_info,
 	unsigned long chan_hdl);
+enum ipa_client_type ipa_eth_get_ipa_client_type_from_eth_type(
+	enum ipa_eth_client_type eth_client_type, enum ipa_eth_pipe_direction dir);
+
+bool ipa_eth_client_exist(enum ipa_eth_client_type eth_client_type, int inst_id);
 
 int ipa3_disable_apps_wan_cons_deaggr(uint32_t agg_size, uint32_t agg_count);
 

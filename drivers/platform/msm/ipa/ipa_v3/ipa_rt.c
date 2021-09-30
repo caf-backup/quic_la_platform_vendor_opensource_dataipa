@@ -337,7 +337,6 @@ static int ipa_prep_rt_tbl_for_cmt(enum ipa_ip_type ip,
 
 	if ((tbl->sz[IPA_RULE_HASHABLE] +
 		tbl->sz[IPA_RULE_NON_HASHABLE]) == 0) {
-		WARN_ON_RATELIMIT_IPA(1);
 		IPAERR_RL("rt tbl %s is with zero total size\n", tbl->name);
 	}
 
@@ -499,8 +498,8 @@ int __ipa_commit_rt_v3(enum ipa_ip_type ip)
 			IPA_MEM_PART(apps_v4_rt_hash_ofst);
 		lcl_nhash_bdy = ipa3_ctx->smem_restricted_bytes +
 			IPA_MEM_PART(apps_v4_rt_nhash_ofst);
-		lcl_hash = ipa3_ctx->ip4_rt_tbl_hash_lcl;
-		lcl_nhash = ipa3_ctx->ip4_rt_tbl_nhash_lcl;
+		lcl_hash = ipa3_ctx->rt_tbl_hash_lcl[IPA_IP_v4];
+		lcl_nhash = ipa3_ctx->rt_tbl_nhash_lcl[IPA_IP_v4];
 		alloc_params.tbls_num = IPA_MEM_PART(v4_apps_rt_index_hi) -
 			IPA_MEM_PART(v4_apps_rt_index_lo) + 1;
 	} else {
@@ -517,8 +516,8 @@ int __ipa_commit_rt_v3(enum ipa_ip_type ip)
 			IPA_MEM_PART(apps_v6_rt_hash_ofst);
 		lcl_nhash_bdy = ipa3_ctx->smem_restricted_bytes +
 			IPA_MEM_PART(apps_v6_rt_nhash_ofst);
-		lcl_hash = ipa3_ctx->ip6_rt_tbl_hash_lcl;
-		lcl_nhash = ipa3_ctx->ip6_rt_tbl_nhash_lcl;
+		lcl_hash = ipa3_ctx->rt_tbl_hash_lcl[IPA_IP_v6];
+		lcl_nhash = ipa3_ctx->rt_tbl_nhash_lcl[IPA_IP_v6];
 		alloc_params.tbls_num = IPA_MEM_PART(v6_apps_rt_index_hi) -
 			IPA_MEM_PART(v6_apps_rt_index_lo) + 1;
 	}
@@ -569,7 +568,8 @@ int __ipa_commit_rt_v3(enum ipa_ip_type ip)
 	}
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1) {
+	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+		&& !ipa3_ctx->ulso_wa) {
 		u32 offset = 0;
 
 		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
@@ -888,12 +888,8 @@ static struct ipa3_rt_tbl *__ipa_add_rt_tbl(enum ipa_ip_type ip,
 		strlcpy(entry->name, name, IPA_RESOURCE_NAME_MAX);
 		entry->set = set;
 		entry->cookie = IPA_RT_TBL_COOKIE;
-		entry->in_sys[IPA_RULE_HASHABLE] = (ip == IPA_IP_v4) ?
-			!ipa3_ctx->ip4_rt_tbl_hash_lcl :
-			!ipa3_ctx->ip6_rt_tbl_hash_lcl;
-		entry->in_sys[IPA_RULE_NON_HASHABLE] = (ip == IPA_IP_v4) ?
-			!ipa3_ctx->ip4_rt_tbl_nhash_lcl :
-			!ipa3_ctx->ip6_rt_tbl_nhash_lcl;
+		entry->in_sys[IPA_RULE_HASHABLE] = !ipa3_ctx->rt_tbl_hash_lcl[ip];
+		entry->in_sys[IPA_RULE_NON_HASHABLE] = !ipa3_ctx->rt_tbl_nhash_lcl[ip];
 		set->tbl_cnt++;
 		entry->rule_ids = &set->rule_ids;
 		list_add(&entry->link, &set->head_rt_tbl_list);
@@ -1476,12 +1472,14 @@ bail:
  * ipa3_add_rt_rule_ext_v2() - Add the specified routing rules
  * to SW with rule id and optionally commit to IPA HW
  * @rules:	[inout] set of routing rules to add
+ * @user: [in] true if the rt rules are added from userspace
  *
  * Returns:	0 on success, negative on failure
  *
  * Note:	Should not be called from atomic context
  */
-int ipa3_add_rt_rule_ext_v2(struct ipa_ioc_add_rt_rule_ext_v2 *rules)
+int ipa3_add_rt_rule_ext_v2(struct ipa_ioc_add_rt_rule_ext_v2 *rules,
+	bool user)
 {
 	int i;
 	int ret;
@@ -1505,7 +1503,7 @@ int ipa3_add_rt_rule_ext_v2(struct ipa_ioc_add_rt_rule_ext_v2 *rules)
 					&(((struct ipa_rt_rule_add_ext_i *)
 					rules->rules)[i].rt_rule_hdl),
 					((struct ipa_rt_rule_add_ext_i *)
-					rules->rules)[i].rule_id, true)) {
+					rules->rules)[i].rule_id, user)) {
 			IPAERR_RL("failed to add rt rule %d\n", i);
 			((struct ipa_rt_rule_add_ext_i *)
 			rules->rules)[i].status = IPA_RT_STATUS_OF_ADD_FAILED;

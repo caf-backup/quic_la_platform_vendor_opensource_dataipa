@@ -487,7 +487,7 @@ struct gsi_chan_props {
 	uint8_t ch_id;
 	unsigned long evt_ring_hdl;
 	enum gsi_chan_ring_elem_size re_size;
-	uint16_t ring_len;
+	uint32_t ring_len;
 	uint16_t max_re_expected;
 	uint64_t ring_base_addr;
 	uint8_t db_in_bytes;
@@ -2424,5 +2424,40 @@ int gsi_query_flow_control_state_ee(unsigned int chan_idx, unsigned int ee,
  * gsi_deregister_device
  *
  */
+
+/**
+ * These APIs are mostly for the ipa_stats module
+ */
+uint64_t gsi_read_event_ring_wp(int evtr_id, int ee);
+
+uint64_t gsi_read_event_ring_bp(int evt_hdl);
+
+uint64_t gsi_get_evt_ring_rp(int evt_hdl);
+
+uint64_t gsi_read_chan_ring_wp(int chan_id, int ee);
+
+uint64_t gsi_read_chan_ring_rp(int chan_id, int ee);
+
+uint64_t gsi_read_chan_ring_bp(int chan_hdl);
+
+uint64_t gsi_read_chan_ring_re_fetch_wp(int chan_id, int ee);
+
+enum gsi_chan_prot gsi_get_chan_prot_type(int chan_hdl);
+
+enum gsi_chan_state gsi_get_chan_state(int chan_hdl);
+
+int gsi_get_chan_poll_mode(int chan_hdl);
+
+uint32_t gsi_get_ring_len(int chan_hdl);
+
+uint8_t gsi_get_chan_props_db_in_bytes(int chan_hdl);
+
+enum gsi_evt_ring_elem_size gsi_get_evt_ring_re_size(int evt_hdl);
+
+uint32_t gsi_get_evt_ring_len(int evt_hdl);
+
+int gsi_get_peripheral_ee(void);
+
+uint32_t gsi_get_chan_stop_stm(int chan_id, int ee);
 
 #endif

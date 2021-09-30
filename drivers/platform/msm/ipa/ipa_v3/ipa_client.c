@@ -68,11 +68,18 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 		if ((ep->client == IPA_CLIENT_USB_DPL_CONS) ||
 				(ep->client == IPA_CLIENT_TPUT_CONS) ||
 				(ep->client == IPA_CLIENT_MHI_DPL_CONS) ||
-				(ep->client == IPA_CLIENT_MHI_QDSS_CONS))
+				(ep->client == IPA_CLIENT_MHI_QDSS_CONS)) {
 			holb_cfg.en = IPA_HOLB_TMR_EN;
-		else
+			holb_cfg.tmr_val = 0;
+		} else if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_1 &&
+			ipa3_ctx->platform_type == IPA_PLAT_TYPE_APQ &&
+			ep->client == IPA_CLIENT_USB_CONS) {
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+		} else {
 			holb_cfg.en = IPA_HOLB_TMR_DIS;
-		holb_cfg.tmr_val = 0;
+			holb_cfg.tmr_val = 0;
+		}
 		res = ipa3_cfg_ep_holb(clnt_hdl, &holb_cfg);
 	}
 
@@ -796,10 +803,9 @@ int ipa3_get_usb_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 
-	if (!ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad parms NULL usb_gsi_stats_mmio\n");
+	if (!ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
+
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_USB_CHANNELS; i++) {
 		stats->u.ring[i].ringFull = ioread32(
@@ -2056,10 +2062,9 @@ int ipa3_get_aqc_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 
-	if (!ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad parms NULL aqc_gsi_stats_mmio\n");
+	if (!ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
+
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_AQC_CHANNELS; i++) {
 		ipa3_get_gsi_ring_stats(stats->u.ring + i,
@@ -2084,10 +2089,9 @@ int ipa3_get_ntn_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 
-	if (!ipa3_ctx->ntn_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad parms NULL ntn_gsi_stats_mmio\n");
+	if (!ipa3_ctx->ntn_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
+
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_NTN_CHANNELS; i++) {
 		ipa3_get_gsi_ring_stats(stats->u.ring + i,
@@ -2113,10 +2117,9 @@ int ipa3_get_rtk_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 	int i;
 	u64 low, high;
 
-	if (!ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad parms NULL eth_gsi_stats_mmio\n");
+	if (!ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
+
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_RTK_CHANNELS; i++) {
 		ipa3_get_gsi_ring_stats(&stats->u.rtk[i].commStats,

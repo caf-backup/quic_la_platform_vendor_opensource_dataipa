@@ -14,8 +14,14 @@
 #include <linux/ipa_wdi3.h>
 #include <linux/ipa_wigig.h>
 #include <linux/ipa_eth.h>
+#include <linux/ipa_usb.h>
 #include <linux/ratelimit.h>
+#include "ipa_stats.h"
 #include "gsi.h"
+
+#ifndef IPA_ETH_API_VER
+#define IPA_ETH_API_VER 1
+#endif
 
 #define WARNON_RATELIMIT_BURST 1
 #define IPA_RATELIMIT_BURST 1
@@ -172,6 +178,12 @@ do {\
 
 #define IPA_GSI_CHANNEL_STOP_SLEEP_MIN_USEC (3000)
 #define IPA_GSI_CHANNEL_STOP_SLEEP_MAX_USEC (5000)
+
+#define STR_ETH_IFACE "eth"
+#define STR_ETH0_IFACE "eth0"
+#define STR_ETH1_IFACE "eth1"
+#define STR_RNDIS_IFACE "rndis"
+#define STR_ECM_IFACE "ecm"
 
 /**
  * qmap_hdr -
@@ -703,6 +715,8 @@ int ipa3_add_hdr_hpc(struct ipa_ioc_add_hdr *hdrs);
 
 int ipa3_add_hdr_hpc_usr(struct ipa_ioc_add_hdr *hdrs, bool user_only);
 
+int ipa3_del_hdr_hpc(struct ipa_ioc_del_hdr *hdrs);
+
 int ipa3_add_hdr(struct ipa_ioc_add_hdr *hdrs);
 
 int ipa3_del_hdr(struct ipa_ioc_del_hdr *hdls);
@@ -878,16 +892,27 @@ int ipa_eth_emac_disconnect(
 	struct ipa_eth_client_pipe_info *pipe,
 	enum ipa_client_type client_type);
 
+#if IPA_ETH_API_VER < 2
 int ipa_eth_client_conn_evt(struct ipa_ecm_msg *msg);
 
 int ipa_eth_client_disconn_evt(struct ipa_ecm_msg *msg);
+
+#endif
 
 /* ULSO mode Query */
 bool ipa3_is_ulso_supported(void);
 
 /* IPA_PACKET_INIT_EX IC to pipe API */
 int ipa_set_pkt_init_ex_hdr_ofst(
-	struct ipa_pkt_init_ex_hdr_ofst_set *lookup, bool proc_ctx);
+  struct ipa_pkt_init_ex_hdr_ofst_set *lookup, bool proc_ctx);
+
+/* IPA stats pm functions */
+int ipa_pm_get_scaling_bw_levels(struct ipa_lnx_clock_stats *clock_stats);
+int ipa_pm_get_aggregated_throughput(void);
+int ipa_pm_get_current_clk_vote(void);
+bool ipa_get_pm_client_stats_filled(struct pm_client_stats *pm_stats_ptr,
+	int pm_client_index);
+int ipa_pm_get_pm_clnt_throughput(enum ipa_client_type client_type);
 
 struct sk_buff* qmap_encapsulate_skb(struct sk_buff *skb, const struct qmap_hdr *qh);
 

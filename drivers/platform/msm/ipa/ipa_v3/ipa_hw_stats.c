@@ -441,6 +441,7 @@ int ipa_hw_stats_init(void)
 fail_free_stats_ctx:
 	kfree(teth_stats_init);
 	kfree(ipa3_ctx->hw_stats);
+	ipa3_ctx->hw_stats = NULL;
 	return ret;
 }
 
@@ -545,7 +546,7 @@ int ipa_init_quota_stats(u32 *pipe_bitmask)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	ipa_ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
-	if (ipa_ep_idx != IPA_EP_NOT_ALLOCATED) {
+	if (ipa_ep_idx != IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&coal_cmd_pyld);
 		if (!coal_cmd_pyld) {
 			IPAERR("failed to construct coal close IC\n");
@@ -716,7 +717,7 @@ int ipa_get_quota_stats(struct ipa_quota_stats_all *out)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&cmd_pyld[num_cmd]);
 		if (!cmd_pyld[num_cmd]) {
 			IPAERR("failed to construct coal close IC\n");
@@ -940,7 +941,7 @@ int ipa_init_teth_stats(struct ipa_teth_stats_endpoints *in)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&coal_cmd_pyld);
 		if (!coal_cmd_pyld) {
 			IPAERR("failed to construct coal close IC\n");
@@ -1124,7 +1125,7 @@ int ipa_get_teth_stats(void)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&cmd_pyld[num_cmd]);
 		if (!cmd_pyld[num_cmd]) {
 			IPAERR("failed to construct coal close IC\n");
@@ -1421,7 +1422,7 @@ int ipa_init_flt_rt_stats(void)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&coal_cmd_pyld);
 		if (!coal_cmd_pyld) {
 			IPAERR("failed to construct coal close IC\n");
@@ -1620,7 +1621,7 @@ static int __ipa_get_flt_rt_stats(struct ipa_ioc_flt_rt_query *query)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&cmd_pyld[num_cmd]);
 		if (!cmd_pyld[num_cmd]) {
 			IPAERR("failed to construct coal close IC\n");
@@ -1834,29 +1835,44 @@ int ipa_drop_stats_init(void)
 	u32 reg_idx;
 	u32 mask, pipe_bitmask[IPA_EP_ARR_SIZE] = {0};
 
-	/* If HOLB Monitoring is enabled, enable drop stats for USB and WLAN. */
-	if (ipa3_ctx->uc_ctx.ipa_use_uc_holb_monitor) {
-		mask = ipa_hw_stats_get_ep_bit_n_idx(
-			IPA_CLIENT_USB_CONS,
-			&reg_idx);
-		pipe_bitmask[reg_idx] |= mask;
+	mask = ipa_hw_stats_get_ep_bit_n_idx(
+		IPA_CLIENT_USB_CONS,
+		&reg_idx);
+	pipe_bitmask[reg_idx] |= mask;
 
+	if (ipa3_ctx->ipa_wdi3_5g_holb_timeout || ipa3_ctx->uc_ctx.ipa_use_uc_holb_monitor) {
 		mask = ipa_hw_stats_get_ep_bit_n_idx(
 			IPA_CLIENT_WLAN2_CONS,
 			&reg_idx);
 		pipe_bitmask[reg_idx] |= mask;
 	}
-	if (ipa3_ctx->use_tput_est_ep) {
+
+	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_MDM) {
+		if (ipa3_ctx->ipa_wdi3_2g_holb_timeout) {
+			mask = ipa_hw_stats_get_ep_bit_n_idx(
+				IPA_CLIENT_WLAN2_CONS1,
+				&reg_idx);
+			pipe_bitmask[reg_idx] |= mask;
+		}
+
+		if (ipa3_ctx->use_tput_est_ep) {
+			mask = ipa_hw_stats_get_ep_bit_n_idx(
+				IPA_CLIENT_TPUT_CONS,
+				&reg_idx);
+			pipe_bitmask[reg_idx] |= mask;
+
+		}
+	} else {
 		mask = ipa_hw_stats_get_ep_bit_n_idx(
-			IPA_CLIENT_TPUT_CONS,
+			IPA_CLIENT_USB_DPL_CONS,
+			&reg_idx);
+		pipe_bitmask[reg_idx] |= mask;
+
+		mask = ipa_hw_stats_get_ep_bit_n_idx(
+			IPA_CLIENT_ODL_DPL_CONS,
 			&reg_idx);
 		pipe_bitmask[reg_idx] |= mask;
 	}
-	/* Always enable drop stats for USB DPL Pipe. */
-	mask = ipa_hw_stats_get_ep_bit_n_idx(
-		IPA_CLIENT_USB_DPL_CONS,
-		&reg_idx);
-	pipe_bitmask[reg_idx] |= mask;
 
 	/* Currently we have option to enable drop stats using debugfs.
 	 * To enable drop stats for a different pipe, first user needs
@@ -1879,6 +1895,7 @@ int ipa_init_drop_stats(u32 *pipe_bitmask)
 		{0};
 	struct ipahal_imm_cmd_pyld *coal_cmd_pyld = NULL;
 	struct ipa3_desc desc[IPA_INIT_DROP_STATS_MAX_CMD_NUM] = { {0} };
+	struct ipa_hw_stats_drop tmp_drop;
 	dma_addr_t dma_address;
 	int ret, i;
 	int num_cmd = 0;
@@ -1889,27 +1906,33 @@ int ipa_init_drop_stats(u32 *pipe_bitmask)
 	if (!pipe_bitmask)
 		return -EPERM;
 
-	/* reset driver's cache */
-	memset(&ipa3_ctx->hw_stats->drop, 0, sizeof(ipa3_ctx->hw_stats->drop));
+	/* check if IPA has enough space for # of pipes drop stats enabled*/
+	memset(&tmp_drop, 0, sizeof(tmp_drop));
 	for (i = 0; i < IPA5_PIPE_REG_NUM; i++) {
-		ipa3_ctx->hw_stats->drop.init.enabled_bitmask[i] =
-			pipe_bitmask[i];
+		tmp_drop.init.enabled_bitmask[i] = pipe_bitmask[i];
 		IPADBG_LOW("pipe_bitmask[%d]=0x%x\n", i, pipe_bitmask[i]);
 	}
 
 	pyld = ipahal_stats_generate_init_pyld(IPAHAL_HW_STATS_DROP,
-		&ipa3_ctx->hw_stats->drop.init, false);
+		&tmp_drop.init, false);
 	if (!pyld) {
 		IPAERR("failed to generate pyld\n");
 		return -EPERM;
 	}
 
 	if (pyld->len > IPA_MEM_PART(stats_drop_size)) {
-		IPAERR("SRAM partition too small: %d needed %d\n",
-			IPA_MEM_PART(stats_drop_size), pyld->len);
+		IPAERR("SRAM partition too small: %d bytes (%d pipes)."
+			"Tried to add %d bytes (%d pipes)."
+			"Please disable some stats before adding new ones.\n",
+			IPA_MEM_PART(stats_drop_size), IPA_MEM_PART(stats_drop_size)/8,
+			pyld->len, pyld->len/8);
 		ret = -EPERM;
 		goto destroy_init_pyld;
 	}
+
+	/* reset driver's cache and copy the bitmask of new drop enabled pipes */
+	memset(&ipa3_ctx->hw_stats->drop, 0, sizeof(ipa3_ctx->hw_stats->drop));
+	ipa3_ctx->hw_stats->drop = tmp_drop;
 
 	dma_address = dma_map_single(ipa3_ctx->pdev,
 		pyld->data,
@@ -1923,7 +1946,7 @@ int ipa_init_drop_stats(u32 *pipe_bitmask)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&coal_cmd_pyld);
 		if (!coal_cmd_pyld) {
 			IPAERR("failed to construct coal close IC\n");
@@ -2095,7 +2118,7 @@ int ipa_get_drop_stats(struct ipa_drop_stats_all *out)
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
 	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) !=
-		IPA_EP_NOT_ALLOCATED) {
+		IPA_EP_NOT_ALLOCATED && !ipa3_ctx->ulso_wa) {
 		ipa_close_coal_frame(&cmd_pyld[num_cmd]);
 		if (!cmd_pyld[num_cmd]) {
 			IPAERR("failed to construct coal close IC\n");
@@ -2622,11 +2645,21 @@ static ssize_t ipa_debugfs_print_drop_stats(struct file *file,
 			ipahal_get_ep_bit(ep_idx)))
 			continue;
 
-
-		nbytes += scnprintf(dbg_buff + nbytes,
-			IPA_MAX_MSG_LEN - nbytes,
-			"%s:\n",
-			ipa_clients_strings[i]);
+		/* Use more descriptive names for WLAN2_CONS pipes */
+		if(i == IPA_CLIENT_WLAN2_CONS) {
+			nbytes += scnprintf(dbg_buff + nbytes,
+				IPA_MAX_MSG_LEN - nbytes,
+				"IPA_CLIENT_WLAN2_HIGHSPEED_CONS:\n");
+		} else if(i == IPA_CLIENT_WLAN2_CONS1) {
+			nbytes += scnprintf(dbg_buff + nbytes,
+				IPA_MAX_MSG_LEN - nbytes,
+				" IPA_CLIENT_WLAN2_LOWSPEED_CONS:\n");
+		} else {
+			nbytes += scnprintf(dbg_buff + nbytes,
+				IPA_MAX_MSG_LEN - nbytes,
+				"%s:\n",
+				ipa_clients_strings[i]);
+		}
 
 		nbytes += scnprintf(dbg_buff + nbytes,
 			IPA_MAX_MSG_LEN - nbytes,

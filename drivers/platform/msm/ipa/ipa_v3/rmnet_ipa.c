@@ -485,7 +485,8 @@ static int ipa3_setup_dflt_wan_rt_tables(void)
 			(uint8_t)IPPROTO_ICMP;
 	}
 
-	if (ipa3_add_rt_rule_ext_v2(rt_rule)) {
+	if (ipa3_add_rt_rule_ext_v2(rt_rule,
+		false)) {
 		IPAWANERR("fail to add dflt_wan v4 rule\n");
 		ret = -EPERM;
 		goto free_rule_entry;
@@ -509,7 +510,8 @@ static int ipa3_setup_dflt_wan_rt_tables(void)
 		rt_rule_entry[WAN_RT_ICMP].rule.attrib.u.v6.next_hdr =
 			(uint8_t)NEXTHDR_ICMP;
 	}
-	if (ipa3_add_rt_rule_ext_v2(rt_rule)) {
+	if (ipa3_add_rt_rule_ext_v2(rt_rule,
+		false)) {
 		IPAWANERR("fail to add dflt_wan v6 rule\n");
 		ret = -EPERM;
 		goto free_rule_entry;
@@ -596,7 +598,8 @@ static int ipa3_setup_low_lat_rt_rules(void)
 	rt_rule_entry[WAN_RT_ICMP].rule.attrib.u.v4.protocol =
 		(uint8_t)IPPROTO_ICMP;
 
-	if (ipa3_add_rt_rule_ext_v2(rt_rule)) {
+	if (ipa3_add_rt_rule_ext_v2(rt_rule,
+		false)) {
 		IPAWANERR("fail to add low lat v4 rule\n");
 		ret = -EPERM;
 		goto free_rule_entry;
@@ -616,7 +619,8 @@ static int ipa3_setup_low_lat_rt_rules(void)
 		IPA_FLT_META_DATA | IPA_FLT_NEXT_HDR;
 	rt_rule_entry[WAN_RT_ICMP].rule.attrib.u.v6.next_hdr =
 		(uint8_t)IPPROTO_ICMP;
-	if (ipa3_add_rt_rule_ext_v2(rt_rule)) {
+	if (ipa3_add_rt_rule_ext_v2(rt_rule,
+		false)) {
 		IPAWANERR("fail to add low lat v6 rule\n");
 		ret = -EPERM;
 		goto free_rule_entry;
@@ -2031,6 +2035,11 @@ static int ipa3_setup_apps_wan_cons_pipes(
 			ingress_param->agg_pkt_limit;
 		ipa_wan_ep_cfg->ipa_ep_cfg.aggr.aggr_time_limit =
 			ingress_param->agg_time_limit;
+		if (ipa3_ctx->ulso_wa &&
+			ingress_param->ingress_ep_type == RMNET_INGRESS_COALS) {
+			/* WAR: overriding the time limit of coalescing to 0*/
+			ipa_wan_ep_cfg->ipa_ep_cfg.aggr.aggr_time_limit = 0;
+		}
 	}
 
 	if (ingress_param->cs_offload_en) {
@@ -2326,16 +2335,16 @@ static int handle3_ingress_format_v2(struct net_device *dev,
 			return -EFAULT;
 		}
 
-		if(ipa3_ctx->rmnet_ll_enable) {
-			rc = ipa3_setup_low_lat_rt_rules();
-			if (rc)
-				IPAWANERR("low lat rt rule add failed = %d\n", rc);
-		}
-
 		rc = ipa3_setup_dflt_wan_rt_tables();
 		if (rc) {
 			ipa3_del_a7_qmap_hdr();
 			return rc;
+		}
+
+		if(ipa3_ctx->rmnet_ll_enable) {
+			rc = ipa3_setup_low_lat_rt_rules();
+			if (rc)
+				IPAWANERR("low lat rt rule add failed = %d\n", rc);
 		}
 		/* Sending QMI indication message share RSC/QMAP pipe details*/
 		IPAWANDBG("ingress_ep_mask = %d\n", rmnet_ipa3_ctx->ingress_eps_mask);
@@ -3020,6 +3029,8 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		/* Get MTU */
 		case RMNET_IOCTL_GET_MTU:
 			mux_channel = rmnet_ipa3_ctx->mux_channel;
+			ext_ioctl_data.u.mtu_params.if_name
+				[IFNAMSIZ-1] = '\0';
 			rmnet_index =
 				find_vchannel_name_index(ext_ioctl_data.u.mtu_params.if_name);
 
@@ -3040,6 +3051,8 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		/* Set MTU */
 		case RMNET_IOCTL_SET_MTU:
 			mux_channel = rmnet_ipa3_ctx->mux_channel;
+			ext_ioctl_data.u.mtu_params.if_name
+				[IFNAMSIZ-1] = '\0';
 			rmnet_index =
 				find_vchannel_name_index(ext_ioctl_data.u.mtu_params.if_name);
 
@@ -3187,16 +3200,14 @@ static int rmnet_ipa_send_coalesce_notification(uint8_t qmap_id,
 	if (!coalesce_info)
 		return -ENOMEM;
 
-	if (enable) {
-		coalesce_info->qmap_id = qmap_id;
-		coalesce_info->tcp_enable = tcp;
-		coalesce_info->udp_enable = udp;
+	coalesce_info->qmap_id = qmap_id;
+	coalesce_info->tcp_enable = tcp;
+	coalesce_info->udp_enable = udp;
+	msg_meta.msg_len = sizeof(struct ipa_coalesce_info);
+	if (enable)
 		msg_meta.msg_type = IPA_COALESCE_ENABLE;
-		msg_meta.msg_len = sizeof(struct ipa_coalesce_info);
-	} else {
+	else
 		msg_meta.msg_type = IPA_COALESCE_DISABLE;
-		msg_meta.msg_len = sizeof(struct ipa_coalesce_info);
-	}
 	rc = ipa_send_msg(&msg_meta, coalesce_info, ipa3_wwan_msg_free_cb);
 	if (rc) {
 		IPAWANERR("ipa_send_msg failed: %d\n", rc);
@@ -3744,14 +3755,21 @@ static int ipa3_wwan_remove(struct platform_device *pdev)
 	rmnet_ipa3_ctx->ingress_eps_mask = IPA_AP_INGRESS_NONE;
 	rmnet_ipa3_ctx->wan_rt_table_setup = false;
 	mutex_unlock(&rmnet_ipa3_ctx->pipe_handle_guard);
+	/* Clean up netdev resources in BEFORE_SHUTDOWN for non remoteproc
+	 * targets. */
+#if !IS_ENABLED(CONFIG_QCOM_Q6V5_PAS)
 	IPAWANINFO("rmnet_ipa unregister_netdev\n");
-	unregister_netdev(IPA_NETDEV());
+	if (IPA_NETDEV())
+		unregister_netdev(IPA_NETDEV());
 	ipa3_wwan_deregister_netdev_pm_client();
+#endif
 	cancel_work_sync(&ipa3_tx_wakequeue_work);
 	cancel_delayed_work(&ipa_tether_stats_poll_wakequeue_work);
+#if !IS_ENABLED(CONFIG_QCOM_Q6V5_PAS)
 	if (IPA_NETDEV())
 		free_netdev(IPA_NETDEV());
 	rmnet_ipa3_ctx->wwan_priv = NULL;
+#endif
 	/* No need to remove wwan_ioctl during SSR */
 	if (!atomic_read(&rmnet_ipa3_ctx->is_ssr))
 		ipa3_wan_ioctl_deinit();
@@ -3968,6 +3986,17 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 #endif
 		IPAWANINFO("IPA Received MPSS AFTER_SHUTDOWN\n");
 		ipa3_set_modem_up(false);
+		/* Clean up netdev resources in AFTER_SHUTDOWN for remoteproc
+		 * enabled targets. */
+#if IS_ENABLED(CONFIG_QCOM_Q6V5_PAS)
+		IPAWANINFO("rmnet_ipa unregister_netdev\n");
+		if (IPA_NETDEV())
+			unregister_netdev(IPA_NETDEV());
+		ipa3_wwan_deregister_netdev_pm_client();
+		if (IPA_NETDEV())
+			free_netdev(IPA_NETDEV());
+		rmnet_ipa3_ctx->wwan_priv = NULL;
+#endif
 		if (atomic_read(&rmnet_ipa3_ctx->is_ssr) &&
 			ipa3_ctx_get_type(IPA_HW_TYPE) < IPA_HW_v4_0)
 			ipa3_q6_post_shutdown_cleanup();

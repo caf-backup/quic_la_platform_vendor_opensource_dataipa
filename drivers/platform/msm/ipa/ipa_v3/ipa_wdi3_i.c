@@ -1206,10 +1206,8 @@ int ipa3_get_wdi3_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 
-	if (!ipa3_ctx->wdi3_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad NULL parms for wdi3_gsi_stats\n");
+	if (!ipa3_ctx->wdi3_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
 
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_WDI3_CHANNELS; i++) {
