@@ -930,6 +930,13 @@ static int ipa3_handle_rx_core(struct ipa3_sys_context *sys, bool process_all,
 			ipa3_dma_memcpy_notify(sys);
 		else if (IPA_CLIENT_IS_WLAN_CONS(sys->ep->client))
 			ipa3_wlan_wq_rx_common(sys, &notify);
+		else if (sys->ep->client == IPA_CLIENT_APPS_LAN_CONS)
+		{
+			/* Special handling for all lan-rx traffic, especially for wlan */
+			local_bh_disable();
+			ipa3_wq_rx_common(sys, &notify);
+			local_bh_enable();
+		}
 		else
 			ipa3_wq_rx_common(sys, &notify);
 
@@ -3254,12 +3261,9 @@ static struct sk_buff *ipa3_skb_copy_for_client(struct sk_buff *skb, int len)
 {
 	struct sk_buff *skb2 = NULL;
 
-	if (!ipa3_ctx->lan_rx_napi_enable)
-		skb2 = __dev_alloc_skb(len + IPA_RX_BUFF_CLIENT_HEADROOM,
-					GFP_KERNEL);
-	else
-		skb2 = __dev_alloc_skb(len + IPA_RX_BUFF_CLIENT_HEADROOM,
-					GFP_ATOMIC);
+	/* specialy handling for wlan-rx can't sleep */
+	skb2 = __dev_alloc_skb(len + IPA_RX_BUFF_CLIENT_HEADROOM,
+				GFP_ATOMIC);
 
 	if (likely(skb2)) {
 		/* Set the data pointer */
