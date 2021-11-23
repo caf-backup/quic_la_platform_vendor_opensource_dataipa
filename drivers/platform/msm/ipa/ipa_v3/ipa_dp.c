@@ -926,18 +926,13 @@ static int ipa3_handle_rx_core(struct ipa3_sys_context *sys, bool process_all,
 		if (ret)
 			break;
 
-		if (IPA_CLIENT_IS_MEMCPY_DMA_CONS(sys->ep->client)) {
+		if (IPA_CLIENT_IS_MEMCPY_DMA_CONS(sys->ep->client))
 			ipa3_dma_memcpy_notify(sys);
-		} else if (IPA_CLIENT_IS_WLAN_CONS(sys->ep->client)) {
+		else if (IPA_CLIENT_IS_WLAN_CONS(sys->ep->client))
 			ipa3_wlan_wq_rx_common(sys, &notify);
-		} else if (sys->ep->client == IPA_CLIENT_WLAN1_PROD ||
-			   sys->ep->client == IPA_CLIENT_WLAN2_PROD) {
-			local_bh_disable();
+		else
 			ipa3_wq_rx_common(sys, &notify);
-			local_bh_enable();
-		} else {
-			ipa3_wq_rx_common(sys, &notify);
-		}
+
 		++cnt;
 	}
 	return cnt;
@@ -3255,7 +3250,12 @@ static struct sk_buff *ipa3_skb_copy_for_client(struct sk_buff *skb, int len)
 {
 	struct sk_buff *skb2 = NULL;
 
-	skb2 = __dev_alloc_skb(len + IPA_RX_BUFF_CLIENT_HEADROOM, GFP_ATOMIC);
+	if (!ipa3_ctx->lan_rx_napi_enable)
+		skb2 = __dev_alloc_skb(len + IPA_RX_BUFF_CLIENT_HEADROOM,
+					GFP_KERNEL);
+	else
+		skb2 = __dev_alloc_skb(len + IPA_RX_BUFF_CLIENT_HEADROOM,
+					GFP_ATOMIC);
 
 	if (likely(skb2)) {
 		/* Set the data pointer */
