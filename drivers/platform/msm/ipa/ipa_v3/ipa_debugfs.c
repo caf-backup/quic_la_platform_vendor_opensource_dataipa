@@ -1595,7 +1595,7 @@ static ssize_t ipa3_read_ntn(struct file *file, char __user *ubuf,
 #define RX_STATS(y) \
 	stats.rx_ch_stats[0].y
 
-	struct Ipa3HwStatsNTNInfoData_t stats;
+	struct Ipa3HwStatsNTNInfoData_t stats = {0};
 	int nbytes;
 	int cnt = 0;
 
@@ -1672,7 +1672,7 @@ static ssize_t ipa3_read_ntn(struct file *file, char __user *ubuf,
 static ssize_t ipa3_read_wdi(struct file *file, char __user *ubuf,
 		size_t count, loff_t *ppos)
 {
-	struct IpaHwStatsWDIInfoData_t stats;
+	struct IpaHwStatsWDIInfoData_t stats = {0};
 	int nbytes;
 	int cnt = 0;
 	struct IpaHwStatsWDITxInfoData_t *tx_ch_ptr;
@@ -2349,7 +2349,7 @@ static ssize_t ipa3_read_ipahal_regs(struct file *file, char __user *ubuf,
 static ssize_t ipa3_read_wdi_gsi_stats(struct file *file,
 		char __user *ubuf, size_t count, loff_t *ppos)
 {
-	struct ipa_uc_dbg_ring_stats stats;
+	struct ipa_uc_dbg_ring_stats stats = {0};
 	int nbytes;
 	int cnt = 0;
 
@@ -2397,7 +2397,7 @@ done:
 static ssize_t ipa3_read_wdi3_gsi_stats(struct file *file,
 		char __user *ubuf, size_t count, loff_t *ppos)
 {
-	struct ipa_uc_dbg_ring_stats stats;
+	struct ipa_uc_dbg_ring_stats stats = {0};
 	int nbytes;
 	int cnt = 0;
 
@@ -2462,7 +2462,7 @@ done:
 static ssize_t ipa3_read_aqc_gsi_stats(struct file *file,
 		char __user *ubuf, size_t count, loff_t *ppos)
 {
-	struct ipa_uc_dbg_ring_stats stats;
+	struct ipa_uc_dbg_ring_stats stats = {0};
 	int nbytes;
 	int cnt = 0;
 
@@ -2509,7 +2509,7 @@ done:
 static ssize_t ipa3_read_mhip_gsi_stats(struct file *file,
 	char __user *ubuf, size_t count, loff_t *ppos)
 {
-	struct ipa_uc_dbg_ring_stats stats;
+	struct ipa_uc_dbg_ring_stats stats = {0};
 	int nbytes;
 	int cnt = 0;
 
@@ -2581,7 +2581,7 @@ done:
 static ssize_t ipa3_read_usb_gsi_stats(struct file *file,
 	char __user *ubuf, size_t count, loff_t *ppos)
 {
-	struct ipa_uc_dbg_ring_stats stats;
+	struct ipa_uc_dbg_ring_stats stats = {0};
 	int nbytes;
 	int cnt = 0;
 
