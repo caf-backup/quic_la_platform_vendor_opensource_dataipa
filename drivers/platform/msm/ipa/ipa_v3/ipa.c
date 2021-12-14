@@ -4956,8 +4956,7 @@ static int ipa3_q6_set_ex_path_to_apps(void)
 	}
 
 	/* Will wait 500msecs for IPA tag process completion */
-	retval = ipa3_tag_process(desc, num_descs,
-		msecs_to_jiffies(CLEANUP_TAG_PROCESS_TIMEOUT));
+	retval = ipa3_tag_process(desc, num_descs, CLEANUP_TAG_PROCESS_TIMEOUT);
 	if (retval) {
 		IPAERR("TAG process failed! (error %d)\n", retval);
 		/* For timeout error ipa3_destroy_imm cb will destroy user1 */
@@ -9144,6 +9143,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 
 	mutex_init(&ipa3_ctx->app_clock_vote.mutex);
 	ipa3_ctx->is_modem_up = false;
+	ipa3_ctx->mhi_ctrl_state = IPA_MHI_CTRL_NOT_SETUP;
 
 	return 0;
 

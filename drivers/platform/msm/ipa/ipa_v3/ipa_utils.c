@@ -5796,9 +5796,9 @@ static struct ipa3_mem_partition ipa_5_0_mem_part = {
 	.apps_hdr_proc_ctx_size = 0x200,
 	.apps_hdr_proc_ctx_size_ddr = 0x0,
 	.stats_quota_q6_ofst = 0x2868,
-	.stats_quota_q6_size = 0x48,
-	.stats_quota_ap_ofst = 0x28B0,
-	.stats_quota_ap_size = 0x60,
+	.stats_quota_q6_size = 0x60,
+	.stats_quota_ap_ofst = 0x28C8,
+	.stats_quota_ap_size = 0x48,
 	.stats_tethering_ofst = 0x2910,
 	.stats_tethering_size = 0x0,
 	.apps_v4_flt_nhash_ofst = 0x2918,
@@ -5893,9 +5893,9 @@ static struct ipa3_mem_partition ipa_5_1_mem_part = {
 	.apps_hdr_proc_ctx_size = 0x200,
 	.apps_hdr_proc_ctx_size_ddr = 0x0,
 	.stats_quota_q6_ofst = 0x2868,
-	.stats_quota_q6_size = 0x48,
-	.stats_quota_ap_ofst = 0x28B0,
-	.stats_quota_ap_size = 0x60,
+	.stats_quota_q6_size = 0x60,
+	.stats_quota_ap_ofst = 0x28C8,
+	.stats_quota_ap_size = 0x48,
 	.stats_tethering_ofst = 0x2910,
 	.stats_tethering_size = 0x3c0,
 	.stats_flt_v4_ofst = 0,
@@ -7912,10 +7912,7 @@ int ipa3_cfg_ep_ctrl(u32 clnt_hdl, const struct ipa_ep_cfg_ctrl *ep_ctrl)
 		ep_ctrl->ipa_ep_suspend,
 		ep_ctrl->ipa_ep_delay);
 	ep = &ipa3_ctx->ep[clnt_hdl];
-	if (ep->client == IPA_CLIENT_MHI_LOW_LAT_PROD) {
-		IPAERR("WAR: DON'T SET FLOW CONTROL FOR MHI LOW LAT PIPE\n");
-		return 0;
-	}
+
 	if (ipa3_ctx->ipa_endp_delay_wa_v2 &&
 		IPA_CLIENT_IS_PROD(ep->client)) {
 
@@ -7926,7 +7923,8 @@ int ipa3_cfg_ep_ctrl(u32 clnt_hdl, const struct ipa_ep_cfg_ctrl *ep_ctrl)
 		 * AP controlled pipe configuring primary flow control.
 		 */
 		if (ep->client == IPA_CLIENT_USB_PROD ||
-			ep->client == IPA_CLIENT_MHI_PROD)
+			ep->client == IPA_CLIENT_MHI_PROD ||
+			ep->client == IPA_CLIENT_MHI_LOW_LAT_PROD)
 			primary_secondry = true;
 		else
 			primary_secondry = false;
@@ -9821,12 +9819,21 @@ retry_alloc:
 		WARN_ON(1);
 		if (atomic_dec_return(&comp->cnt) == 0)
 			kfree(comp);
+		if (cmd.base) {
+			dma_free_coherent(ipa3_ctx->pdev, cmd.size,
+				cmd.base, cmd.phys_base);
+		}
 		return -ETIME;
 	}
 
 	IPADBG("TAG response arrived!\n");
 	if (atomic_dec_return(&comp->cnt) == 0)
 		kfree(comp);
+
+	if (cmd.base) {
+		dma_free_coherent(ipa3_ctx->pdev, cmd.size,
+			cmd.base, cmd.phys_base);
+	}
 
 	/*
 	 * sleep for short period to ensure IPA wrote all packets to
@@ -9855,7 +9862,7 @@ fail_free_desc:
 			tag_desc[i].callback(tag_desc[i].user1,
 				tag_desc[i].user2);
 	if (cmd.base) {
-		dma_free_coherent(ipa3_ctx->uc_pdev, cmd.size,
+		dma_free_coherent(ipa3_ctx->pdev, cmd.size,
 			cmd.base, cmd.phys_base);
 	}
 fail_free_tag_desc:
@@ -12730,3 +12737,53 @@ int ipa3_send_eogre_info(
 done:
 	return res;
 }
+
+/* Send MHI endpoint info to modem using QMI indication message */
+int ipa_send_mhi_endp_ind_to_modem(void)
+{
+	struct ipa_endp_desc_indication_msg_v01 req;
+	struct ipa_ep_id_type_v01 *ep_info;
+	int ipa_mhi_prod_ep_idx =
+		ipa3_get_ep_mapping(IPA_CLIENT_MHI_LOW_LAT_PROD);
+	int ipa_mhi_cons_ep_idx =
+		ipa3_get_ep_mapping(IPA_CLIENT_MHI_LOW_LAT_CONS);
+
+	mutex_lock(&ipa3_ctx->lock);
+	/* only modem up and MHI ctrl pipes are ready, then send QMI*/
+	if (!ipa3_ctx->is_modem_up ||
+		ipa3_ctx->mhi_ctrl_state != IPA_MHI_CTRL_SETUP_ALL) {
+		mutex_unlock(&ipa3_ctx->lock);
+		return 0;
+	}
+	mutex_unlock(&ipa3_ctx->lock);
+
+	IPADBG("Sending MHI end point indication to modem\n");
+	memset(&req, 0, sizeof(struct ipa_endp_desc_indication_msg_v01));
+	req.ep_info_len = 2;
+	req.ep_info_valid = true;
+	req.num_eps_valid = true;
+	req.num_eps = 2;
+	ep_info = &req.ep_info[0];
+	ep_info->ep_id = ipa_mhi_cons_ep_idx;
+	ep_info->ic_type = DATA_IC_TYPE_MHI_V01;
+	ep_info->ep_type = DATA_EP_DESC_TYPE_EMB_FLOW_CTL_PROD_V01;
+	ep_info->ep_status = DATA_EP_STATUS_CONNECTED_V01;
+	ep_info = &req.ep_info[1];
+	ep_info->ep_id = ipa_mhi_prod_ep_idx;
+	ep_info->ic_type = DATA_IC_TYPE_MHI_V01;
+	ep_info->ep_type = DATA_EP_DESC_TYPE_EMB_FLOW_CTL_CONS_V01;
+	ep_info->ep_status = DATA_EP_STATUS_CONNECTED_V01;
+	return ipa3_qmi_send_endp_desc_indication(&req);
+}
+
+void ipa3_update_mhi_ctrl_state(u8 state, bool set)
+{
+	mutex_lock(&ipa3_ctx->lock);
+	if (set)
+		ipa3_ctx->mhi_ctrl_state |= state;
+	else
+		ipa3_ctx->mhi_ctrl_state &= ~state;
+	mutex_unlock(&ipa3_ctx->lock);
+	ipa_send_mhi_endp_ind_to_modem();
+}
+EXPORT_SYMBOL(ipa3_update_mhi_ctrl_state);
