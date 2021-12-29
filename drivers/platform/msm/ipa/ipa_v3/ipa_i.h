@@ -344,6 +344,8 @@ enum {
 
 #define IPA3_ACTIVE_CLIENTS_TABLE_BUF_SIZE 4096
 
+#define IPA_UC_ACT_TBL_SIZE 1000
+
 #define IPA3_ACTIVE_CLIENT_LOG_TYPE_EP 0
 #define IPA3_ACTIVE_CLIENT_LOG_TYPE_SIMPLE 1
 #define IPA3_ACTIVE_CLIENT_LOG_TYPE_RESOURCE 2
@@ -563,6 +565,12 @@ enum ipa_icc_type {
 };
 
 #define IPA_ICC_MAX (IPA_ICC_PATH_MAX*IPA_ICC_TYPE_MAX)
+
+
+#define IPA_MHI_CTRL_NOT_SETUP (0)
+#define IPA_MHI_CTRL_UL_SETUP (1 << 1)
+#define IPA_MHI_CTRL_DL_SETUP (1 << 2)
+#define IPA_MHI_CTRL_SETUP_ALL (IPA_MHI_CTRL_UL_SETUP | IPA_MHI_CTRL_DL_SETUP)
 
 /**
  * struct  ipa_rx_page_data - information needed
@@ -1550,6 +1558,7 @@ struct ipa3_stats {
 	u32 tx_non_linear;
 	u32 rx_page_drop_cnt;
 	u64 lower_order;
+	u32 pipe_setup_fail_cnt;
 	struct ipa3_page_recycle_stats page_recycle_stats[3];
 	u64 page_recycle_cnt[3][IPA_PAGE_POLL_THRESHOLD_MAX];
 	atomic_t num_buff_above_thresh_for_def_pipe_notified;
@@ -2143,6 +2152,7 @@ struct ipa_ntn3_client_stats {
  * @eth_info: ethernet client mapping
  * @max_num_smmu_cb: number of smmu s1 cb supported
  * @non_hash_flt_lcl_sys_switch: number of times non-hash flt table moved
+ * mhi_ctrl_state: state of mhi ctrl pipes
  */
 struct ipa3_context {
 	struct ipa3_char_device_context cdev;
@@ -2377,6 +2387,12 @@ struct ipa3_context {
 	bool buff_above_thresh_for_coal_pipe_notified;
 	bool buff_below_thresh_for_def_pipe_notified;
 	bool buff_below_thresh_for_coal_pipe_notified;
+	u8 mhi_ctrl_state;
+	struct ipa_mem_buffer uc_act_tbl;
+	bool uc_act_tbl_valid;
+	struct mutex act_tbl_lock;
+	int uc_act_tbl_total;
+	int uc_act_tbl_next_index;
 };
 
 struct ipa3_plat_drv_res {
@@ -2786,6 +2802,12 @@ int ipa3_cfg_ep_holb_by_client(enum ipa_client_type client,
 int ipa3_cfg_ep_ctrl(u32 clnt_hdl, const struct ipa_ep_cfg_ctrl *ep_ctrl);
 
 int ipa3_cfg_ep_ulso(u32 clnt_hdl, const struct ipa_ep_cfg_ulso *ep_ulso);
+
+int ipa3_setup_uc_act_tbl(void);
+
+int ipa3_add_socksv5_conn(struct ipa_socksv5_info *info);
+
+int ipa3_del_socksv5_conn(uint32_t handle);
 
 /*
  * Header removal / addition
@@ -3596,4 +3618,8 @@ int ipa3_send_eogre_info(
 	enum ipa_eogre_event etype,
 	struct ipa_ioc_eogre_info *info );
 
+/* update mhi ctrl pipe state */
+void ipa3_update_mhi_ctrl_state(u8 state, bool set);
+/* Send MHI endpoint info to modem using QMI indication message */
+int ipa_send_mhi_endp_ind_to_modem(void);
 #endif /* _IPA3_I_H_ */
