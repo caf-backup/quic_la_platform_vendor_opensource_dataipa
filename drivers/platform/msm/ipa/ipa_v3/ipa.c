@@ -630,27 +630,6 @@ static int ipa3_clean_mhip_dl_rule(void)
 	return 0;
 }
 
-static int ipa3_active_clients_panic_notifier(struct notifier_block *this,
-		unsigned long event, void *ptr)
-{
-	if (ipa3_ctx != NULL)
-	{
-		if (ipa3_ctx->is_device_crashed)
-			return NOTIFY_DONE;
-		ipa3_ctx->is_device_crashed = true;
-	}
-
-	ipa3_active_clients_log_print_table(active_clients_table_buf,
-			IPA3_ACTIVE_CLIENTS_TABLE_BUF_SIZE);
-	IPAERR("%s\n", active_clients_table_buf);
-
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block ipa3_active_clients_panic_blk = {
-	.notifier_call  = ipa3_active_clients_panic_notifier,
-};
-
 #ifdef CONFIG_IPA_DEBUG
 static int ipa3_active_clients_log_insert(const char *string)
 {
@@ -702,9 +681,6 @@ static int ipa3_active_clients_log_init(void)
 	ipa3_ctx->ipa3_active_clients_logging.log_tail =
 			IPA3_ACTIVE_CLIENTS_LOG_BUFFER_SIZE_LINES - 1;
 	hash_init(ipa3_ctx->ipa3_active_clients_logging.htable);
-	/* 2nd ipa3_active_clients_panic_notifier */
-	atomic_notifier_chain_register(&panic_notifier_list,
-			&ipa3_active_clients_panic_blk);
 	ipa3_ctx->ipa3_active_clients_logging.log_rdy = true;
 
 	return 0;
@@ -2365,16 +2341,7 @@ static int proc_sram_info_rqst(
 	return 0;
 }
 
-static void ipa3_mac_flt_list_free_cb(void *buff, u32 len, u32 type)
-{
-	if (!buff) {
-		IPAERR("Null buffer\n");
-		return;
-	}
-	kfree(buff);
-}
-
-static void ipa3_pkt_threshold_free_cb(void *buff, u32 len, u32 type)
+static void ipa3_general_free_cb(void *buff, u32 len, u32 type)
 {
 	if (!buff) {
 		IPAERR("Null buffer\n");
@@ -2408,7 +2375,7 @@ static int ipa3_send_mac_flt_list(unsigned long usr_param)
 		((struct ipa_ioc_mac_client_list_type *)buff)->flt_state);
 
 	retval = ipa3_send_msg(&msg_meta, buff,
-		ipa3_mac_flt_list_free_cb);
+		ipa3_general_free_cb);
 	if (retval) {
 		IPAERR("ipa3_send_msg failed: %d, msg_type %d\n",
 		retval,
@@ -2472,7 +2439,7 @@ static int ipa3_send_pkt_threshold(unsigned long usr_param)
 		((struct ipa_set_pkt_threshold *)buff2)->pkt_threshold);
 
 	retval = ipa3_send_msg(&msg_meta, buff2,
-		ipa3_pkt_threshold_free_cb);
+		ipa3_general_free_cb);
 	if (retval) {
 		IPAERR("ipa3_send_msg failed: %d, msg_type %d\n",
 		retval,
@@ -2536,7 +2503,7 @@ static int ipa3_send_sw_flt_list(unsigned long usr_param)
 		((struct ipa_sw_flt_list_type *)buff)->iface_enable);
 
 	retval = ipa3_send_msg(&msg_meta, buff,
-		ipa3_mac_flt_list_free_cb);
+		ipa3_general_free_cb);
 	if (retval) {
 		IPAERR("ipa3_send_msg failed: %d, msg_type %d\n",
 		retval,
@@ -2595,7 +2562,7 @@ static int ipa3_send_ippt_sw_flt_list(unsigned long usr_param)
 		((struct ipa_ippt_sw_flt_list_type *)buff)->port_enable);
 
 	retval = ipa3_send_msg(&msg_meta, buff,
-		ipa3_mac_flt_list_free_cb);
+		ipa3_general_free_cb);
 	if (retval) {
 		IPAERR("ipa3_send_msg failed: %d, msg_type %d\n",
 		retval,
@@ -2604,6 +2571,46 @@ static int ipa3_send_ippt_sw_flt_list(unsigned long usr_param)
 		return retval;
 	}
 	return 0;
+}
+
+/**
+ * ipa3_send_macsec_info() - Pass macsec mapping to the IPACM
+ * @event_type: Type of the event - UP or DOWN
+ * @map: pointer to macsec to eth mapping structure
+ *
+ * Returns: 0 on success, negative on failure
+ */
+int ipa3_send_macsec_info(enum ipa_macsec_event event_type, struct ipa_macsec_map *map)
+{
+	struct ipa_msg_meta msg_meta;
+	int res = 0;
+
+	if (!map) {
+		IPAERR("Bad arg: info is NULL\n");
+		res = -EIO;
+		goto done;
+	}
+
+	/*
+	 * Prep and send msg to ipacm
+	 */
+	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
+	msg_meta.msg_type = event_type;
+	msg_meta.msg_len  = sizeof(struct ipa_macsec_map);
+
+	/*
+	 * Post event to ipacm
+	 */
+	res = ipa3_send_msg(&msg_meta, map, ipa3_general_free_cb);
+
+	if (res) {
+		IPAERR_RL("ipa3_send_msg failed: %d\n", res);
+		kfree(map);
+		goto done;
+	}
+
+done:
+	return res;
 }
 
 static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -2624,6 +2631,8 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	struct ipa_ioc_get_vlan_mode vlan_mode;
 	struct ipa_ioc_wigig_fst_switch fst_switch;
 	struct ipa_ioc_eogre_info eogre_info;
+	struct ipa_ioc_macsec_info macsec_info;
+	struct ipa_macsec_map *macsec_map;
 	bool send2uC, send2ipacm;
 	size_t sz;
 	int pre_entry;
@@ -4006,6 +4015,47 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			IPAERR("ipa_flt_sram_set_client_prio_high failed! retval=%d\n", retval);
 		break;
 #endif
+
+	case IPA_IOC_ADD_MACSEC_MAPPING:
+	case IPA_IOC_DEL_MACSEC_MAPPING:
+		IPADBG("Got %s\n", cmd == IPA_IOC_ADD_MACSEC_MAPPING ?
+			"IPA_IOC_ADD_MACSEC_MAPPING" : "IPA_IOC_DEL_MACSEC_MAPPING");
+		if (copy_from_user(&macsec_info, (const void __user *) arg,
+			sizeof(struct ipa_ioc_macsec_info))) {
+			IPAERR_RL("copy_from_user for ipa_ioc_macsec_info fails\n");
+			retval = -EFAULT;
+			break;
+		}
+
+		/* Validate the input */
+		if (macsec_info.ioctl_data_size != sizeof(struct ipa_macsec_map)) {
+			IPAERR_RL("data size missmatch\n");
+			retval = -EFAULT;
+			break;
+		}
+
+		macsec_map = kzalloc(sizeof(struct ipa_macsec_map), GFP_KERNEL);
+		if (!macsec_map) {
+			IPAERR("macsec_map memory allocation failed !\n");
+			retval = -ENOMEM;
+			break;
+		}
+
+		if (copy_from_user(macsec_map, (const void __user *)(macsec_info.ioctl_ptr),
+			sizeof(struct ipa_macsec_map))) {
+			IPAERR_RL("copy_from_user for ipa_macsec_map fails\n");
+			retval = -EFAULT;
+			kfree(macsec_map);
+			break;
+		}
+
+		/* Send message to the IPACM */
+		ipa3_send_macsec_info(
+			(cmd == IPA_IOC_ADD_MACSEC_MAPPING) ?
+			IPA_MACSEC_ADD_EVENT : IPA_MACSEC_DEL_EVENT,
+			macsec_map);
+		break;
+
 	default:
 		IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 		return -ENOTTY;
@@ -7066,6 +7116,7 @@ static int ipa3_panic_notifier(struct notifier_block *this,
 	{
 		if (ipa3_ctx->is_device_crashed)
 			return NOTIFY_DONE;
+		ipa3_ctx->is_device_crashed = true;
 	}
 
 	ipa3_freeze_clock_vote_and_notify_modem();
@@ -7085,6 +7136,10 @@ static int ipa3_panic_notifier(struct notifier_block *this,
 		ipahal_print_all_regs(false);
 		ipa_wigig_save_regs();
 	}
+
+	ipa3_active_clients_log_print_table(active_clients_table_buf,
+			IPA3_ACTIVE_CLIENTS_TABLE_BUF_SIZE);
+	IPAERR("%s\n", active_clients_table_buf);
 
 	return NOTIFY_DONE;
 }
@@ -7277,6 +7332,8 @@ static inline void ipa3_register_to_fmwk(void)
 		ipa3_register_notifier;
 	data.ipa_unregister_notifier =
 		ipa3_unregister_notifier;
+	data.ipa_add_socksv5_conn = ipa3_add_socksv5_conn;
+	data.ipa_del_socksv5_conn = ipa3_del_socksv5_conn;
 
 	if (ipa_fmwk_register_ipa(&data)) {
 		IPAERR("couldn't register to IPA framework\n");
@@ -7702,6 +7759,10 @@ static int ipa3_post_init(const struct ipa3_plat_drv_res *resource_p,
 		IPADBG("register to fmwk\n");
 		ipa3_register_to_fmwk();
 	}
+
+	/* init uc-activation tbl*/
+	ipa3_setup_uc_act_tbl();
+
 	complete_all(&ipa3_ctx->init_completion_obj);
 
 	ipa_ut_module_init();
@@ -8637,6 +8698,9 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	ipa3_ctx->mpm_ring_size_dl = DEFAULT_MPM_RING_SIZE_DL;
 	ipa3_ctx->mpm_teth_aggr_size = DEFAULT_MPM_TETH_AGGR_SIZE;
 	ipa3_ctx->mpm_uc_thresh = DEFAULT_MPM_UC_THRESH_SIZE;
+	ipa3_ctx->uc_act_tbl_valid = false;
+	ipa3_ctx->uc_act_tbl_total = 0;
+	ipa3_ctx->uc_act_tbl_next_index = 0;
 
 	if (resource_p->gsi_fw_file_name) {
 		ipa3_ctx->gsi_fw_file_name =
@@ -8863,7 +8927,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	if (!ipa3_ctx->power_mgmt_wq) {
 		IPAERR("failed to create power mgmt wq\n");
 		result = -ENOMEM;
-		goto fail_init_hw;
+		goto fail_gsi_map;
 	}
 
 	ipa3_ctx->transport_power_mgmt_wq =
@@ -8997,6 +9061,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 
 	mutex_init(&ipa3_ctx->q6_proxy_clk_vote_mutex);
 	mutex_init(&ipa3_ctx->ipa_cne_evt_lock);
+	mutex_init(&ipa3_ctx->act_tbl_lock);
 
 	idr_init(&ipa3_ctx->ipa_idr);
 	spin_lock_init(&ipa3_ctx->idr_lock);
@@ -9199,8 +9264,6 @@ fail_flt_rule_cache:
 	destroy_workqueue(ipa3_ctx->transport_power_mgmt_wq);
 fail_create_transport_wq:
 	destroy_workqueue(ipa3_ctx->power_mgmt_wq);
-fail_init_hw:
-	gsi_unmap_base();
 fail_gsi_map:
 	if (ipa3_ctx->reg_collection_base)
 		iounmap(ipa3_ctx->reg_collection_base);
@@ -9208,6 +9271,7 @@ fail_gsi_map:
 fail_remap:
 	ipa3_disable_clks();
 	ipa3_active_clients_log_destroy();
+	gsi_unmap_base();
 fail_init_active_client:
 	if (ipa3_clk)
 		clk_put(ipa3_clk);
@@ -10862,22 +10926,23 @@ int ipa3_plat_drv_probe(struct platform_device *pdev_p)
 
 	if (of_property_read_bool(pdev_p->dev.of_node, "qcom,arm-smmu")) {
 		if (of_property_read_bool(pdev_p->dev.of_node,
-			"qcom,use-64-bit-dma-mask"))
+			"qcom,use-64-bit-dma-mask")) {
 			smmu_info.use_64_bit_dma_mask = true;
+			if (dma_set_mask_and_coherent(&pdev_p->dev, DMA_BIT_MASK(64))) {
+				IPAERR("DMA set 64bit mask failed\n");
+				return -EOPNOTSUPP;
+			}
+		}
 		smmu_info.arm_smmu = true;
 	} else {
 		if (of_property_read_bool(pdev_p->dev.of_node,
 			"qcom,use-64-bit-dma-mask")) {
-			if (dma_set_mask(&pdev_p->dev, DMA_BIT_MASK(64)) ||
-			    dma_set_coherent_mask(&pdev_p->dev,
-			    DMA_BIT_MASK(64))) {
+			if (dma_set_mask_and_coherent(&pdev_p->dev, DMA_BIT_MASK(64))) {
 				IPAERR("DMA set 64bit mask failed\n");
 				return -EOPNOTSUPP;
 			}
 		} else {
-			if (dma_set_mask(&pdev_p->dev, DMA_BIT_MASK(32)) ||
-			    dma_set_coherent_mask(&pdev_p->dev,
-			    DMA_BIT_MASK(32))) {
+			if (dma_set_mask_and_coherent(&pdev_p->dev, DMA_BIT_MASK(32))) {
 				IPAERR("DMA set 32bit mask failed\n");
 				return -EOPNOTSUPP;
 			}
