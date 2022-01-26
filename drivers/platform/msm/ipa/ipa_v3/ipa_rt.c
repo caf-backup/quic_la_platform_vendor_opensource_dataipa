@@ -94,7 +94,7 @@ static int ipa_generate_rt_hw_rule(enum ipa_ip_type ip,
 		}
 	}
 
-	if (entry->proc_ctx || (entry->hdr && entry->hdr->is_hdr_proc_ctx)) {
+	if (entry->proc_ctx) {
 		struct ipa3_hdr_proc_ctx_entry *proc_ctx;
 
 		proc_ctx = (entry->proc_ctx) ? : entry->hdr->proc_ctx;
@@ -170,6 +170,9 @@ static int ipa_translate_rt_tbl_to_hw_fmt(enum ipa_ip_type ip,
 			/* only body (no header) */
 			tbl_mem.size = tbl->sz[rlt] -
 				ipahal_get_hw_tbl_hdr_width();
+			/* Add prefetech buf size. */
+			tbl_mem.size +=
+				ipahal_get_hw_prefetch_buf_size();
 			if (ipahal_fltrt_allocate_hw_sys_tbl(&tbl_mem)) {
 				IPAERR_RL("fail to alloc sys tbl of size %d\n",
 					tbl_mem.size);
