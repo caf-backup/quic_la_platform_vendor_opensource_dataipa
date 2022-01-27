@@ -344,6 +344,8 @@ enum {
 
 #define IPA3_ACTIVE_CLIENTS_TABLE_BUF_SIZE 4096
 
+#define IPA_UC_ACT_TBL_SIZE 1000
+
 #define IPA3_ACTIVE_CLIENT_LOG_TYPE_EP 0
 #define IPA3_ACTIVE_CLIENT_LOG_TYPE_SIMPLE 1
 #define IPA3_ACTIVE_CLIENT_LOG_TYPE_RESOURCE 2
@@ -616,6 +618,7 @@ struct ipa_smmu_cb_ctx {
 	u32 va_end;
 	bool shared;
 	bool is_cache_coherent;
+	bool done;
 };
 
 /**
@@ -778,10 +781,6 @@ struct ipa3_rt_tbl {
  * @name: name of header table entry
  * @type: l2 header type
  * @is_partial: flag indicating if header table entry is partial
- * @is_hdr_proc_ctx: false - hdr entry resides in hdr table,
- * true - hdr entry resides in DDR and pointed to by proc ctx
- * @phys_base: physical address of entry in DDR when is_hdr_proc_ctx is true,
- * else 0
  * @proc_ctx: processing context header
  * @offset_entry: entry's offset
  * @cookie: cookie used for validity check
@@ -801,8 +800,6 @@ struct ipa3_hdr_entry {
 	char name[IPA_RESOURCE_NAME_MAX];
 	enum ipa_hdr_l2_type type;
 	u8 is_partial;
-	bool is_hdr_proc_ctx;
-	dma_addr_t phys_base;
 	struct ipa3_hdr_proc_ctx_entry *proc_ctx;
 	struct ipa_hdr_offset_entry *offset_entry;
 	u32 ref_cnt;
@@ -2386,6 +2383,13 @@ struct ipa3_context {
 	bool buff_below_thresh_for_def_pipe_notified;
 	bool buff_below_thresh_for_coal_pipe_notified;
 	u8 mhi_ctrl_state;
+	struct ipa_mem_buffer uc_act_tbl;
+	bool uc_act_tbl_valid;
+	struct mutex act_tbl_lock;
+	int uc_act_tbl_total;
+	int uc_act_tbl_next_index;
+	int ipa_pil_load;
+
 };
 
 struct ipa3_plat_drv_res {
@@ -2795,6 +2799,12 @@ int ipa3_cfg_ep_holb_by_client(enum ipa_client_type client,
 int ipa3_cfg_ep_ctrl(u32 clnt_hdl, const struct ipa_ep_cfg_ctrl *ep_ctrl);
 
 int ipa3_cfg_ep_ulso(u32 clnt_hdl, const struct ipa_ep_cfg_ulso *ep_ulso);
+
+int ipa3_setup_uc_act_tbl(void);
+
+int ipa3_add_socksv5_conn(struct ipa_socksv5_info *info);
+
+int ipa3_del_socksv5_conn(uint32_t handle);
 
 /*
  * Header removal / addition
@@ -3609,4 +3619,10 @@ int ipa3_send_eogre_info(
 void ipa3_update_mhi_ctrl_state(u8 state, bool set);
 /* Send MHI endpoint info to modem using QMI indication message */
 int ipa_send_mhi_endp_ind_to_modem(void);
+
+/*
+ * To pass macsec mapping to the IPACM
+ */
+int ipa3_send_macsec_info(enum ipa_macsec_event event_type, struct ipa_macsec_map *map);
+
 #endif /* _IPA3_I_H_ */
