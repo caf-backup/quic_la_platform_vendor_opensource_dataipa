@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -51,8 +50,6 @@ static const char *ipahal_pkt_status_exception_to_str
 	__stringify(IPAHAL_PKT_STATUS_EXCEPTION_NAT),
 	__stringify(IPAHAL_PKT_STATUS_EXCEPTION_IPV6CT),
 	__stringify(IPAHAL_PKT_STATUS_EXCEPTION_UCP),
-	__stringify(IPAHAL_PKT_STATUS_EXCEPTION_INVALID_PIPE),
-	__stringify(IPAHAL_PKT_STATUS_EXCEPTION_HDRI),
 	__stringify(IPAHAL_PKT_STATUS_EXCEPTION_CSUM),
 };
 
@@ -1167,14 +1164,8 @@ static enum ipahal_pkt_status_exception pkt_status_parse_exception(
 			exception_type = IPAHAL_PKT_STATUS_EXCEPTION_NAT;
 		break;
 	case 128:
-		exception_type = IPAHAL_PKT_STATUS_EXCEPTION_UCP;
-		break;
-	case 129:
-		exception_type = IPAHAL_PKT_STATUS_EXCEPTION_INVALID_PIPE;
-		break;
-	case 136:
-		exception_type = IPAHAL_PKT_STATUS_EXCEPTION_HDRI;
-		break;
+                exception_type = IPAHAL_PKT_STATUS_EXCEPTION_UCP;
+                break;
 	case 229:
 		exception_type = IPAHAL_PKT_STATUS_EXCEPTION_CSUM;
 		break;
